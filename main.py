@@ -78,15 +78,20 @@ def check_local_chromedriver(logger):
 
 def get_chrome_version():
     """获取Chrome浏览器版本"""
-    chrome_path = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-    if os.path.exists(chrome_path):
-        from win32com.client import Dispatch
-        parser = Dispatch("Scripting.FileSystemObject")
-        try:
-            version = parser.GetFileVersion(chrome_path)
-            return version.split('.')[0]
-        except Exception:
-            return None
+    chrome_paths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+    ]
+
+    for chrome_path in chrome_paths:
+        if os.path.exists(chrome_path):
+            try:
+                from win32com.client import Dispatch
+                parser = Dispatch("Scripting.FileSystemObject")
+                version = parser.GetFileVersion(chrome_path)
+                return version.split('.')[0]
+            except Exception:
+                continue
     return None
 
 
@@ -349,6 +354,10 @@ class Application:
         # 加载保存的配置
         self.load_saved_config()
 
+        # 底部标签
+        self.footer_label = ttk.Label(self.root, text="Powered by xdlovelife", anchor='center')
+        self.footer_label.pack(side=tk.BOTTOM, fill=tk.X)
+
     def load_saved_config(self):
         """加载保存的配置并填充到界面"""
         config = load_config()
@@ -426,7 +435,7 @@ class Application:
                 self.pause_event.clear()  # 暂停
                 self.pause_button.config(text="继续")
                 self.status_var.set("已暂停")
-                self.logger.log("���作已暂停", "WARNING")
+                self.logger.log("操作已暂停", "WARNING")
             else:
                 self.pause_event.set()  # 继续
                 self.pause_button.config(text="暂停")
@@ -780,7 +789,7 @@ def click_business_communication(driver, logger):
         return True
 
     except Exception as e:
-        logger.log(f"��击商机沟通菜单时发生错误: {str(e)}", "ERROR")
+        logger.log(f"击商机沟通菜单时发生错误: {str(e)}", "ERROR")
         return False
 
 

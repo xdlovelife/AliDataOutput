@@ -16,6 +16,8 @@ import pandas as pd
 import xlwt
 import win32com.client
 import psutil
+import threading
+import openpyxl
 
 # 配置文件路径
 CONFIG_FILE = 'app_config.json'
@@ -157,7 +159,7 @@ def download_chromedriver_from_official(logger):
             logger.log(f"使用已存在的ChromeDriver: {driver_path}", "INFO")
             return driver_path
 
-        # 获取具体版本号
+        # 获取体版本号
         logger.log("正在获取最新版本信息...", "INFO")
         version_url = "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_" + chrome_version
 
@@ -304,23 +306,42 @@ class Application:
     def __init__(self, root):
         self.root = root
         self.root.title("阿里巴巴数据处理工具")
-        self.root.geometry("800x600")
 
-        # 设置窗口图标
+        # 获取屏幕宽度和高度
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+
+        # 设置窗口大小
+        window_width = 800
+        window_height = 600
+
+        # 计算窗口位置，使其显示在屏幕右侧
+        x_position = screen_width - window_width - 20  # 20是与屏幕右边缘的间距
+        y_position = (screen_height - window_height) // 2  # 垂直居中
+
+        # 设置窗口位置和大小
+        self.root.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+
+        # 设置图标
         try:
-            # 检查图标文件是否存在
-            icon_path = 'xdlovelife.ico'
+            icon_path = "xdlovelife1.ico"
             if os.path.exists(icon_path):
                 self.root.iconbitmap(icon_path)
             else:
-                # 如果图标文件不存在，尝试从资源目录加载
-                resource_icon_path = os.path.join('resources', 'xdlovelife.ico')
-                if os.path.exists(resource_icon_path):
-                    self.root.iconbitmap(resource_icon_path)
-                else:
-                    self.logger.log("未找到图标文件: xdlovelife.ico", "WARNING")
+                print(f"图标文件不存在: {icon_path}")
         except Exception as e:
-            self.logger.log(f"设置图标时发生错: {str(e)}", "WARNING")
+            print(f"设置图标失败: {str(e)}")
+
+        # 禁止调整窗口大小
+        self.root.resizable(False, False)
+
+        self.paused = False
+        self.running = False
+        self.pause_event = threading.Event()
+        self.pause_event.set()
+
+        # 创建状态变量
+        self.status_var = tk.StringVar(value="就绪")
 
         # 创建界面
         self.create_widgets()
@@ -369,71 +390,181 @@ class Application:
 
     def execute(self):
         """执行操作"""
-        excel_path = self.excel_path.get()
-        account = self.account_entry.get()
-        password = self.password_entry.get()
+        try:
+            if not self.running:
+                self.running = True
+                self.should_stop = False
+                self.paused = False
 
-        # 保存当前配置
-        self.save_current_config()
+                # 禁用执行按钮，启用暂停按钮
+                self.execute_button.config(state=tk.DISABLED)
+                self.pause_button.config(state=tk.NORMAL)
 
-        # 执行操作
-        execute_action(excel_path, account, password, self.logger)
+                excel_path = self.excel_path.get()
+                account = self.account_entry.get()
+                password = self.password_entry.get()
+
+                # 保存当前配置
+                self.save_current_config()
+
+                # 在新线程中执行操作
+                self.current_thread = threading.Thread(
+                    target=self._execute_thread,
+                    args=(excel_path, account, password)
+                )
+                self.current_thread.start()
+
+        except Exception as e:
+            self.logger.log(f"执行失败: {str(e)}", "ERROR")
+            self.reset_ui()
+
+    def toggle_pause(self):
+        """切换暂停状态"""
+        if self.running:
+            self.paused = not self.paused
+            if self.paused:
+                self.pause_event.clear()  # 暂停
+                self.pause_button.config(text="继续")
+                self.status_var.set("已暂停")
+                self.logger.log("���作已暂停", "WARNING")
+            else:
+                self.pause_event.set()  # 继续
+                self.pause_button.config(text="暂停")
+                self.status_var.set("正在执行")
+                self.logger.log("操作已继续", "INFO")
+
+    def _execute_thread(self, excel_path, account, password):
+        """在新线程中执行操作"""
+        try:
+            execute_action(excel_path, account, password, self.logger)
+        except Exception as e:
+            self.logger.log(f"执行失败: {str(e)}", "ERROR")
+        finally:
+            self.root.after(0, self.reset_ui)
+
+    def update_status(self):
+        """更新状态和进度"""
+        if self.current_thread and self.current_thread.is_alive():
+            self.root.after(100, self.update_status)
+        else:
+            self.reset_ui()
+
+    def reset_ui(self):
+        """重置UI状态"""
+        self.running = False
+        self.paused = False
+        self.pause_event.set()
+        self.execute_button.config(state=tk.NORMAL)
+        self.pause_button.config(state=tk.DISABLED, text="暂停")
+        self.status_var.set("就绪")
 
     def create_widgets(self):
-        """创建界面"""
-        # Excel件选择
-        excel_frame = ttk.LabelFrame(self.root, text="Excel文件", padding=5)
+        # 创建主框架
+        main_frame = ttk.Frame(self.root, padding="5")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 添加注意事项公告
+        notice_frame = ttk.LabelFrame(main_frame, text="注意事项", padding=5)
+        notice_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        notices = [
+            "1. 请确保Excel文件格式正确，D列为司名称，P列为邮箱地址",
+            "2. 程序会自动跳过D列为空或P列已有数据的行",
+            "3. 处理过程中请勿关闭浏览器窗口",
+            "4. 如需暂停，请点击暂停按钮，避免直接关闭程序",
+            "5. 处理完成后数据会自动保存到Excel文件中",
+            "6. 如遇到异常，请查看日志信息进行排查"
+        ]
+
+        for notice in notices:
+            notice_label = ttk.Label(notice_frame, text=notice, wraplength=600)
+            notice_label.pack(anchor=tk.W, padx=5, pady=2)
+
+        # 配置框
+        config_frame = ttk.LabelFrame(main_frame, text="配置", padding=5)
+        config_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Excel文件选择
+        excel_frame = ttk.Frame(config_frame)
         excel_frame.pack(fill=tk.X, padx=5, pady=5)
 
+        ttk.Label(excel_frame, text="Excel文件:").pack(side=tk.LEFT)
         self.excel_path = tk.StringVar()
         ttk.Entry(excel_frame, textvariable=self.excel_path, width=50).pack(side=tk.LEFT, padx=5)
-        ttk.Button(excel_frame, text="选择文件", command=self.select_excel).pack(side=tk.LEFT, padx=5)
+        ttk.Button(excel_frame, text="选择文件", command=self.select_excel).pack(side=tk.LEFT)
 
-        # 账号密码输入
-        input_frame = ttk.LabelFrame(self.root, text="登录信息", padding=5)
-        input_frame.pack(fill=tk.X, padx=5, pady=5)
+        # 账号密码输入框架
+        login_frame = ttk.Frame(config_frame)
+        login_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # 账号
-        account_frame = ttk.Frame(input_frame)
-        account_frame.pack(fill=tk.X, pady=2)
-        ttk.Label(account_frame, text="账号：").pack(side=tk.LEFT, padx=5)
-        self.account_entry = ttk.Entry(account_frame, width=40)
+        # 账号输入
+        ttk.Label(login_frame, text="账号:").pack(side=tk.LEFT)
+        self.account_entry = ttk.Entry(login_frame, width=20)
         self.account_entry.pack(side=tk.LEFT, padx=5)
 
-        # 密码
-        password_frame = ttk.Frame(input_frame)
-        password_frame.pack(fill=tk.X, pady=2)
-        ttk.Label(password_frame, text="密码：").pack(side=tk.LEFT, padx=5)
-        self.password_entry = ttk.Entry(password_frame, width=40, show="*")
+        # 密码输入
+        ttk.Label(login_frame, text="密码:").pack(side=tk.LEFT, padx=(10, 0))
+        self.password_entry = ttk.Entry(login_frame, width=20, show="*")
         self.password_entry.pack(side=tk.LEFT, padx=5)
 
-        # 绑定输入变化事件
-        self.account_entry.bind('<FocusOut>', lambda e: self.save_current_config())
-        self.password_entry.bind('<FocusOut>', lambda e: self.save_current_config())
+        # 按钮框架
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # 行按
-        ttk.Button(self.root, text="执行", command=self.execute).pack(pady=10)
+        # 执行按钮
+        self.execute_button = ttk.Button(
+            button_frame,
+            text="开始执行",
+            command=self.execute
+        )
+        self.execute_button.pack(side=tk.LEFT, padx=5)
 
-        # 日志显示
-        log_frame = ttk.LabelFrame(self.root, text="运行日志", padding=5)
+        # 暂停按钮
+        self.pause_button = ttk.Button(
+            button_frame,
+            text="暂停",
+            command=self.toggle_pause,
+            state=tk.DISABLED
+        )
+        self.pause_button.pack(side=tk.LEFT, padx=5)
+
+        # 日志框架
+        log_frame = ttk.LabelFrame(main_frame, text="运行日志", padding=5)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=10)
+        # 日志文本框
+        self.log_text = scrolledtext.ScrolledText(
+            log_frame,
+            height=15,
+            wrap=tk.WORD
+        )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        # 初始化日志记录器
+        # 初始化日志器
         self.logger = Logger(self.log_text)
+
+        # 状态标签框架
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=5)
+
+        # 状态标签
+        self.status_label = ttk.Label(
+            status_frame,
+            textvariable=self.status_var,
+            width=40
+        )
+        self.status_label.pack(side=tk.LEFT, padx=5)
 
 
 def wait_for_manual_verification(driver, logger, timeout=300):
-    """等待用户手动完成验证"""
-    logger.log("检测到验证码，请手动完成验证...", "WARNING")
+    """等待户手动完成验"""
+    logger.log("检到验证码，请手动完成验证...", "WARNING")
     messagebox.showinfo("提示", "请手动完成验证码，完成后程序将自动继续")
 
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            # 检查是否已经通过验证（URL不再包含login）
+            # 检查是已经通过验证（URL再包含login）
             if "login" not in driver.current_url.lower():
                 logger.log("验证通过，继续执行...", "SUCCESS")
                 return True
@@ -510,8 +641,8 @@ def handle_login(driver, account, password, logger):
                 )
 
                 # 等待验证完成和页面跳转
-                logger.log("待验证完成和页面跳转...", "INFO")
-                max_wait = 300  # 最长等待5分钟
+                logger.log("待验证完成和页面转...", "INFO")
+                max_wait = 300  # 最等待5分钟
                 wait_start = time.time()
 
                 while time.time() - wait_start < max_wait:
@@ -567,7 +698,7 @@ def handle_post_login(driver, excel_path, logger):
         logger.log("开始处理Excel数据...", "INFO")
         process_excel_data(driver, excel_path, logger)
 
-        logger.log("登录后处理完成", "SUCCESS")
+        logger.log("登录后处完成", "SUCCESS")
         return True
 
     except Exception as e:
@@ -625,7 +756,7 @@ def click_business_communication(driver, logger):
         except:
             pass
 
-        # 然后尝试点击商机沟通菜单
+        # 然后尝试点击商机通菜单
         menu_element = wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="seller-menu-container"]/div/div/div/div[2]/div/ul/div[7]/a'))
@@ -638,7 +769,7 @@ def click_business_communication(driver, logger):
         # 等待页面加载完成
         logger.log("等待页面加载完成...")
         wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
-        time.sleep(3)  # 额外等待以确保页面完全加载
+        time.sleep(3)  # 额外等待以确保页面全加载
 
         # 准备搜索
         sender_input = navigate_to_search(driver, logger)
@@ -649,7 +780,7 @@ def click_business_communication(driver, logger):
         return True
 
     except Exception as e:
-        logger.log(f"点击商机沟通菜单时发生错误: {str(e)}", "ERROR")
+        logger.log(f"��击商机沟通菜单时发生错误: {str(e)}", "ERROR")
         return False
 
 
@@ -689,10 +820,11 @@ def kill_excel_process(logger):
         for proc in psutil.process_iter():
             if proc.name().lower() in ['excel.exe', 'xlview.exe']:
                 proc.kill()
-        logger.log("已闭所有Excel进程", "SUCCESS")
+        logger.log("已关闭现有有Excel进程", "SUCCESS")
         return True
     except:
         return False
+
 
 def show_file_locked_dialog(excel_path, logger):
     """显示文件被锁定的提示对话框"""
@@ -700,7 +832,7 @@ def show_file_locked_dialog(excel_path, logger):
         # 创建主窗口
         root = tk.Tk()
 
-        # 设置窗口大小和位置
+        # 设置窗口小和位置
         window_width = 400
         window_height = 200
         screen_width = root.winfo_screenwidth()
@@ -751,156 +883,103 @@ def show_file_locked_dialog(excel_path, logger):
     except Exception as e:
         logger.log(f"显示对话框时发生错误: {str(e)}", "ERROR")
         return "error"
+
+
 def process_excel_data(driver, excel_path, logger):
     try:
-        # 确保日志窗口在最上层
-        if hasattr(logger, 'window'):
-            logger.window.lift()
-            logger.window.attributes('-topmost', True)
-
-        # 在开始处理前检查文件是否被占用
-        if is_file_locked(excel_path):
-            logger.log("检测到Excel文件被占用", "WARNING")
-
-            # 显示对话框
-            response = show_file_locked_dialog(excel_path, logger)
-
-            if response == "cancel":
-                logger.log("操作已取消", "INFO")
-                return False
-            elif response == "close":
-                logger.log("尝试关闭Excel文件...", "INFO")
-                if close_excel_file(excel_path, logger):
-                    logger.log("成功关闭Excel文件", "SUCCESS")
-                    time.sleep(1)  # 等待文件释放
-                else:
-                    logger.log("无法正常关闭Excel，尝试强制关闭...", "WARNING")
-                    if kill_excel_process(logger):
-                        logger.log("已强制关闭Excel", "SUCCESS")
-                        time.sleep(1)  # 等待文件释放
-                    else:
-                        logger.log("无法关闭Excel，将使用临时文件", "WARNING")
-                        response = "temp"
-
-            if response == "temp":
-                logger.log("将使用临时文件机制继续", "INFO")
-                # 更新文件路径为临时文件
-                temp_path = excel_path.rsplit('.', 1)[0] + '_temp.' + excel_path.rsplit('.', 1)[1]
-                excel_path = temp_path
-                logger.log(f"临时文件路径: {excel_path}", "INFO")
-
-            elif response == "error":
-                logger.log("对话框显示失败，操作取消", "ERROR")
-                return False
-
-        # 继续处理Excel数据
-        # 读取Excel文件
         logger.log("正在读取Excel文件...")
-        df = pd.read_excel(excel_path, engine='xlrd')  # 使用 xlrd 引擎读取 .xls
+        df = pd.read_excel(excel_path, engine='openpyxl')
         logger.log("成功读取Excel文件", "SUCCESS")
-
-        # 确保P列存在
-        if df.shape[1] < 16:
-            # 添加缺失的列
-            for i in range(df.shape[1], 16):
-                col_name = chr(ord('A') + i)
-                df[col_name] = ''
-            logger.log("已添加缺失的列", "INFO")
 
         # 定位发件人输入框
         sender_input = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.XPATH, '//*[@id="search-form-sender"]'))
         )
 
-        # 从D7开始处理每一行
         start_row = 6  # Excel中的第7行
-        processed_count = 0  # 记录处理的行数
-        skipped_count = 0  # 记录跳过的行数
+        processed_count = 0
+        skipped_count = 0
 
-        try:
-            while start_row < len(df):
-                # 检查P列是否已有数据
-                p_column_value = str(df.iloc[start_row, 15]).strip()  # P列的索引是15
-                if pd.notna(p_column_value) and p_column_value != '' and p_column_value != 'nan':
-                    logger.log(f"跳过第{start_row + 1}行：P列已有数据 '{p_column_value}'", "INFO")
-                    skipped_count += 1
-                    start_row += 1
-                    continue
-
-                name = df.iloc[start_row, 3]  # D列的索引是3
-                if pd.isna(name):  # 如果是空值就跳过
-                    logger.log(f"跳过第{start_row + 1}行：D列为空", "INFO")
-                    skipped_count += 1
-                    start_row += 1
-                    continue
-
-                logger.log(f"正在处理第{start_row + 1}行: {name}")
-
-                # 直接清空并填入内容
-                sender_input.clear()
-                sender_input.send_keys(Keys.CONTROL + "a", Keys.DELETE)
-                sender_input.send_keys(str(name))
-
-                # 点击搜索按钮
-                search_button = WebDriverWait(driver, 20).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-41"]/form/div[4]/button[1]'))
-                )
-                search_button.click()
-
-                # 等待搜索结果加载
-                logger.log("等待搜索结果加载...")
-                time.sleep(1.5)
-
-                try:
-                    # 点击链接打开新窗口
-                    link = WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-29"]/div[1]'))
-                    )
-                    link.click()
-
-                    # 切换到新窗口
-                    new_window = driver.window_handles[-1]
-                    driver.switch_to.window(new_window)
-
-                    # 等待新页面中的元素加载
-                    content_element = WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located(
-                            (By.XPATH, '//*[@id="app-crm"]/div/div/div[2]/div/div[2]/div/div[2]/div[2]'))
-                    )
-
-                    # 获取内容
-                    content = content_element.text
-                    logger.log(f"获取到内容: {content}")
-
-                    # 关闭新窗口
-                    driver.close()
-
-                    # 切回主窗口
-                    driver.switch_to.window(driver.window_handles[0])
-
-                    # 写入内容并保存
-                    df.iloc[start_row, 15] = content
-                    if not save_excel_data(df, excel_path, logger):
-                        logger.log("保存失败，创建备份...", "WARNING")
-                        # 创建备份
-                        backup_path = excel_path.rsplit('.', 1)[0] + '_backup.' + excel_path.rsplit('.', 1)[1]
-                        save_excel_data(df, backup_path, logger)
-
-                    logger.log(f"已将内容'{content}'保存到第{start_row + 1}行P列", "SUCCESS")
-                    processed_count += 1
-
-                except Exception as e:
-                    logger.log(f"处理第{start_row + 1}行时发生错误: {str(e)}", "ERROR")
-
+        while start_row < len(df):
+            p_column_value = str(df.iloc[start_row, 15]).strip()
+            if pd.notna(p_column_value) and p_column_value != '' and p_column_value != 'nan':
+                logger.log(f"跳过第{start_row + 1}行：P列已有数据 '{p_column_value}'", "INFO")
+                skipped_count += 1
                 start_row += 1
-                time.sleep(1)
+                continue
 
-        except KeyboardInterrupt:
-            logger.log("检测到手动中断，正在保存当前进度...", "WARNING")
-            save_excel_data(df, excel_path, logger)
-            raise
+            name = df.iloc[start_row, 3]
+            if pd.isna(name):
+                logger.log(f"跳过第{start_row + 1}行：D列为空", "INFO")
+                skipped_count += 1
+                start_row += 1
+                continue
 
-        # 最后的统计
+            logger.log(f"正在处理第{start_row + 1}行: {name}")
+
+            # 确保 sender_input 是可交互的
+            if sender_input.is_displayed() and sender_input.is_enabled():
+                sender_input.clear()  # 清空输入框
+                sender_input.send_keys(name)  # 输入D列的名字
+                logger.log(f"已输入搜索内容: {name}", "SUCCESS")
+            else:
+                logger.log("发件人输入框不可用，无法输入内容", "ERROR")
+                continue
+
+            # 点击搜索按钮
+            search_button = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-41"]/form/div[4]/button[1]'))
+            )
+            search_button.click()
+
+            # 等待搜索结果加载
+            logger.log("等待搜索结果加载...")
+            time.sleep(1.5)
+
+            try:
+                # 点击链接打开新窗口
+                link = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-29"]/div[1]'))
+                )
+                link.click()
+
+                # 切换到新窗口
+                new_window = driver.window_handles[-1]
+                driver.switch_to.window(new_window)
+
+                # 等待新页面中的元素加载
+                content_element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, '//*[@id="app-crm"]/div/div/div[2]/div/div[2]/div/div[2]/div[2]'))
+                )
+
+                # 获取内容
+                content = content_element.text
+                logger.log(f"获取到内容: {content}")
+
+                # 关闭新窗口
+                driver.close()
+
+                # 切回主窗口
+                driver.switch_to.window(driver.window_handles[0])
+
+                # 写入内容并保存
+                df.iloc[start_row, 15] = content
+                if not save_excel_data(df, excel_path, logger):
+                    logger.log("保存失败，创建备份...", "WARNING")
+                    # 创建备份
+                    backup_path = excel_path.rsplit('.', 1)[0] + '_backup.' + excel_path.rsplit('.', 1)[1]
+                    save_excel_data(df, backup_path, logger)
+
+                logger.log(f"已将内容'{content}'保存到第{start_row + 1}行P列", "SUCCESS")
+                processed_count += 1
+
+            except Exception as e:
+                logger.log(f"处理第{start_row + 1}行时发生错误: {str(e)}", "ERROR")
+
+            start_row += 1
+            time.sleep(1)
+
         logger.log("================================================================", "SUCCESS")
         logger.log("                      处理完成！", "SUCCESS")
         logger.log("----------------------------------------------------------------", "SUCCESS")
@@ -916,6 +995,7 @@ def process_excel_data(driver, excel_path, logger):
 
 def execute_action(excel_path, account, password, logger):
     """执行主要操作"""
+    driver = None
     try:
         if not all([excel_path, account, password]):
             logger.log("错误：请填写所有必要信息！", "ERROR")
@@ -931,11 +1011,8 @@ def execute_action(excel_path, account, password, logger):
             messagebox.showerror("错误", "网络连接失败，请检查网络设置！")
             return
 
-        # 获取Chrome配置
-        logger.log("正在配置Chrome浏览器...")
+        # 获取Chrome配置和driver
         chrome_options = get_chrome_config()
-
-        # 获取ChromeDriver路径
         driver_path = get_driver_path(logger)
         if not driver_path:
             return
@@ -1000,6 +1077,8 @@ def check_paths(logger):
 
     logger.log("所有路径检查通过", "SUCCESS")
     return True
+
+
 def save_excel_data(df, excel_path, logger):
     """保存Excel数据，处理文件被占用的情况"""
     try:
@@ -1069,6 +1148,7 @@ def save_excel_data(df, excel_path, logger):
             logger.log("创建备份文件失败", "ERROR")
             return False
 
+
 def type_like_human(element, text, logger):
     """快速输入文本"""
     try:
@@ -1099,7 +1179,7 @@ def init_driver(logger):
         x = screen_width - 1020
         driver.set_window_position(x, 20)
 
-        # 设置超时
+        # 置超时
         driver.set_page_load_timeout(30)
         driver.implicitly_wait(10)
 
@@ -1107,8 +1187,84 @@ def init_driver(logger):
         return driver
 
     except Exception as e:
-        logger.log(f"浏览器初始化失败: {str(e)}", "ERROR")
+        logger.log(f"浏览初始化失败: {str(e)}", "ERROR")
         raise
+
+
+def get_content_from_new_window(driver, logger):
+    """从新窗口获取内容"""
+    try:
+        # 点击链接打开新窗口
+        logger.log("等待搜索结果链接...", "INFO")
+        link = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-29"]/div[1]'))
+        )
+        link.click()
+        logger.log("已点击搜索结果链接", "INFO")
+
+        # 获取所有窗口句柄
+        time.sleep(1)  # 等待新窗口打开
+        handles = driver.window_handles
+
+        if len(handles) < 2:
+            logger.log("未能打开新窗口", "ERROR")
+            return False
+
+        # 切换到新窗口
+        new_window = handles[-1]
+        driver.switch_to.window(new_window)
+        logger.log("已切换到新口", "INFO")
+
+        try:
+            # 等待内容加载
+            content_element = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, '//*[@id="app-crm"]/div/div/div[2]/div/div[2]/div/div[2]/div[2]'))
+            )
+
+            # 获取内容
+            content = content_element.text
+            logger.log(f"成功获取内容: {content[:50]}...", "SUCCESS")  # 只显示前50个字符
+
+        except Exception as e:
+            logger.log(f"获取内容时发生错误: {str(e)}", "ERROR")
+            content = None
+
+        finally:
+            # 关闭新窗口
+            try:
+                driver.close()
+                logger.log("已关闭新窗口", "INFO")
+            except:
+                logger.log("关闭新窗口失败", "WARNING")
+
+            # 切回主窗口
+            driver.switch_to.window(handles[0])
+            logger.log("已切回主窗口", "INFO")
+
+        return content
+
+    except Exception as e:
+        logger.log(f"处理新窗口时发生错误: {str(e)}", "ERROR")
+
+        # 尝试恢复到主窗口
+        try:
+            if len(driver.window_handles) > 1:
+                driver.close()  # 关闭当前窗口
+            driver.switch_to.window(driver.window_handles[0])  # 切回主窗口
+            logger.log("已恢复到主窗口", "INFO")
+        except:
+            logger.log("恢复主窗口失败", "ERROR")
+
+        return None
+
+    finally:
+        # 确保回到主窗口
+        try:
+            if driver.current_window_handle != driver.window_handles[0]:
+                driver.switch_to.window(driver.window_handles[0])
+        except:
+            pass
 
 
 def main():

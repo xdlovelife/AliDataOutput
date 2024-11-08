@@ -1,0 +1,17 @@
+2024/11/07-15:22:39.631 6a50 Reusing MANIFEST F:\Pythone Projects\AliDataOutput\chrome_data\Default\Local Storage\leveldb/MANIFEST-000001
+2024/11/07-15:22:39.638 6a50 Recovering log #174
+2024/11/07-15:22:39.639 6a50 Level-0 table #176: started
+2024/11/07-15:22:39.670 6a50 Level-0 table #176: 107673 bytes OK
+2024/11/07-15:22:39.671 6a50 Recovering log #176
+2024/11/07-15:22:39.674 6a50 Reusing old log F:\Pythone Projects\AliDataOutput\chrome_data\Default\Local Storage\leveldb/000176.log 
+2024/11/07-15:22:39.686 6a50 Delete type=0 #174
+2024/11/07-15:22:39.686 6a50 Delete type=2 #177
+2024/11/07-15:22:39.689 6a50 Compacting 4@0 + 1@1 files
+2024/11/07-15:22:39.738 6a50 Generated table #177@0: 121 keys, 680236 bytes
+2024/11/07-15:22:39.738 6a50 Compacted 4@0 + 1@1 files => 680236 bytes
+2024/11/07-15:22:39.752 6a50 compacted to: files[ 0 1 1 0 0 0 0 ]
+2024/11/07-15:22:39.752 6a50 Delete type=2 #167
+2024/11/07-15:22:39.753 6a50 Delete type=2 #169
+2024/11/07-15:22:39.753 6a50 Delete type=2 #171
+2024/11/07-15:22:39.753 6a50 Delete type=2 #173
+2024/11/07-15:22:39.753 6a50 Delete type=2 #176

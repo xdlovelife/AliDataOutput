@@ -1,0 +1,12 @@
+2024/11/07-15:23:32.551 1ea8 Reusing MANIFEST F:\Pythone Projects\AliDataOutput\chrome_data\Default\Local Storage\leveldb/MANIFEST-000001
+2024/11/07-15:23:32.552 1ea8 Recovering log #176
+2024/11/07-15:23:32.554 1ea8 Reusing old log F:\Pythone Projects\AliDataOutput\chrome_data\Default\Local Storage\leveldb/000176.log 
+2024/11/07-15:24:32.726 1ea8 Level-0 table #180: started
+2024/11/07-15:24:32.744 1ea8 Level-0 table #180: 181989 bytes OK
+2024/11/07-15:24:32.751 1ea8 Delete type=0 #176
+2024/11/07-15:24:37.284 1ea8 Level-0 table #182: started
+2024/11/07-15:24:37.298 1ea8 Level-0 table #182: 89816 bytes OK
+2024/11/07-15:24:37.302 1ea8 Delete type=0 #179
+2024/11/07-15:25:31.346 1ea8 Level-0 table #184: started
+2024/11/07-15:25:31.363 1ea8 Level-0 table #184: 139572 bytes OK
+2024/11/07-15:25:31.369 1ea8 Delete type=0 #181

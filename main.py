@@ -18,6 +18,7 @@ import win32com.client
 import psutil
 import threading
 import openpyxl
+import xlrd
 
 # 配置文件路径
 CONFIG_FILE = 'app_config.json'
@@ -232,7 +233,7 @@ def download_chromedriver_from_official(logger):
             return None
 
     except Exception as e:
-        logger.log(f"载ChromeDriver时发生错误: {str(e)}", "ERROR")
+        logger.log(f"载ChromeDriver发生错误: {str(e)}", "ERROR")
         return None
 
 
@@ -272,7 +273,7 @@ def get_driver_path(logger):
         )
         return driver_path
 
-    # 如果本地没有，尝试自动载
+    # 如果本地没有，试自动载
     logger.log("尝试自动下载ChromeDriver...", "INFO")
     driver_path = download_chromedriver_from_official(logger)
 
@@ -310,7 +311,7 @@ def get_driver_path(logger):
 class Application:
     def __init__(self, root):
         self.root = root
-        self.root.title("阿里巴巴数据处理工具")
+        self.root.title("阿里巴巴邮箱数据获取工具")
 
         # 获取屏幕宽度和高度
         screen_width = root.winfo_screenwidth()
@@ -327,13 +328,11 @@ class Application:
         # 设置窗口位置和大小
         self.root.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
 
-        # 设置图标
+        # 设置窗口图标
         try:
-            icon_path = "xdlovelife1.ico"
+            icon_path = 'xdlovelife1.ico'
             if os.path.exists(icon_path):
-                self.root.iconbitmap(icon_path)
-            else:
-                print(f"图标文件不存在: {icon_path}")
+                self.master.iconbitmap(icon_path)
         except Exception as e:
             print(f"设置图标失败: {str(e)}")
 
@@ -459,7 +458,7 @@ class Application:
             self.reset_ui()
 
     def reset_ui(self):
-        """重置UI状态"""
+        """重置UI"""
         self.running = False
         self.paused = False
         self.pause_event.set()
@@ -568,7 +567,7 @@ class Application:
 def wait_for_manual_verification(driver, logger, timeout=300):
     """等待户手动完成验"""
     logger.log("检到验证码，请手动完成验证...", "WARNING")
-    messagebox.showinfo("提示", "请手动完成验证码，完成后程序将自动继续")
+    messagebox.showinfo("提示", "请手动完验证码，完成后程序将自动继续")
 
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -586,7 +585,7 @@ def wait_for_manual_verification(driver, logger, timeout=300):
 
 
 def handle_login(driver, account, password, logger):
-    """处理登录流程"""
+    """处理登录程"""
     try:
         # 等待用名输入框
         logger.log("等待用户名输入框...")
@@ -707,7 +706,7 @@ def handle_post_login(driver, excel_path, logger):
         logger.log("开始处理Excel数据...", "INFO")
         process_excel_data(driver, excel_path, logger)
 
-        logger.log("登录后处完成", "SUCCESS")
+        logger.log("登录后处理完成", "SUCCESS")
         return True
 
     except Exception as e:
@@ -716,7 +715,7 @@ def handle_post_login(driver, excel_path, logger):
 
 
 def navigate_to_search(driver, logger):
-    """导航到搜索页面并准备搜索"""
+    """导航到搜索页面准备搜索"""
     try:
         logger.log("等待搜索区域加载...")
         wait = WebDriverWait(driver, 20)
@@ -793,30 +792,39 @@ def click_business_communication(driver, logger):
         return False
 
 
-def is_file_locked(filepath):
+def is_file_locked(file_path):
     """检查文件是否被占用"""
     try:
-        with open(filepath, 'ab') as _:
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
             return False
-    except:
+
+        # 尝试以写入模式打开文件
+        try:
+            with open(file_path, 'rb+') as f:
+                return False
+        except (IOError, PermissionError):
+            return True
+
+    except Exception:
         return True
 
 
 def close_excel_file(file_path, logger):
-    """关闭指定的Excel文件"""
+    """尝试正常关闭Excel文件"""
     try:
         # 获取Excel应用程序实例
         excel = win32com.client.GetObject(Class="Excel.Application")
 
-        # 检查所有打开的工作簿
+        # 遍历所有打开的工作簿
         for wb in excel.Workbooks:
-            if os.path.abspath(wb.FullName) == os.path.abspath(file_path):
-                logger.log(f"找到打开的Excel文件: {file_path}", "INFO")
-                # 保存并关闭
-                wb.Save()
-                wb.Close()
-                logger.log("已保存并关闭Excel文件", "SUCCESS")
-                return True
+            try:
+                if os.path.abspath(wb.FullName).lower() == os.path.abspath(file_path).lower():
+                    wb.Close(SaveChanges=False)
+                    logger.log(f"已关闭Excel文件: {file_path}", "SUCCESS")
+                    return True
+            except:
+                continue
 
         return False
     except:
@@ -824,170 +832,374 @@ def close_excel_file(file_path, logger):
 
 
 def kill_excel_process(logger):
-    """强制结束所有Excel进程"""
+    """关闭所有Excel进程"""
     try:
-        for proc in psutil.process_iter():
-            if proc.name().lower() in ['excel.exe', 'xlview.exe']:
-                proc.kill()
-        logger.log("已关闭现有有Excel进程", "SUCCESS")
-        return True
-    except:
+        killed = False
+        # 先尝试使用taskkill命令
+        try:
+            os.system('taskkill /F /IM excel.exe')
+            killed = True
+        except:
+            pass
+
+        # 如果taskkill失败，使用psutil
+        if not killed:
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    proc_name = proc.info['name'].lower()
+                    if 'excel' in proc_name or 'et.exe' in proc_name:  # 添加对WPS的支持
+                        proc.kill()
+                        killed = True
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+
+        if killed:
+            logger.log("已关闭Excel进程", "SUCCESS")
+            time.sleep(1)  # 等待进程完全关闭
+            return True
+        else:
+            logger.log("未找到Excel进程", "INFO")
+            return False
+    except Exception as e:
+        logger.log(f"关闭Excel进程时发生错误: {str(e)}", "ERROR")
         return False
 
 
-def show_file_locked_dialog(excel_path, logger):
-    """显示文件被锁定的提示对话框"""
+def show_file_locked_dialog(file_path, logger):
+    """显示文件被占用时的对话框"""
+    response = messagebox.askyesnocancel(
+        "文件被占用",
+        f"文件 {file_path} 被占用。\n是：关闭Excel进程\n否：保存为临时文件\n取消：放弃保存",
+        icon='warning'
+    )
+
+    if response is True:
+        return "close"
+    elif response is False:
+        return "temp"
+    else:
+        return "cancel"
+
+
+def save_excel_data(df, excel_path, logger):
+    """保存Excel数据，处理文件被占用的情况"""
     try:
-        # 创建主窗口
-        root = tk.Tk()
+        # 检查文件类型
+        is_xls = excel_path.lower().endswith('.xls')
 
-        # 设置窗口小和位置
-        window_width = 400
-        window_height = 200
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
+        # 检查文件是否被占用
+        if is_file_locked(excel_path):
+            logger.log("Excel文件正在被其他程序使用", "WARNING")
 
-        # 将窗口放在左侧中间
-        x = 50
-        y = (screen_height - window_height) // 2
+            # 显示文件被占用对话框
+            response = show_file_locked_dialog(excel_path, logger)
 
-        root.geometry(f'{window_width}x{window_height}+{x}+{y}')
+            if response == "close":
+                # 尝试关闭Excel进程
+                if kill_excel_process(logger):
+                    time.sleep(2)  # 等待进程完全关闭
 
-        # 设置窗口置顶
-        root.lift()
-        root.attributes('-topmost', True)
+                    # 再次尝试保存
+                    try:
+                        if is_xls:
+                            # 使用 xlwt 保存
+                            wb = xlwt.Workbook(encoding='utf-8')
+                            ws = wb.add_sheet('Sheet1')
 
-        # 隐藏主窗口但保持置顶效果
-        root.withdraw()
+                            # 写入列名和数据
+                            for col_idx, col_name in enumerate(df.columns):
+                                ws.write(0, col_idx, str(col_name))
 
-        # 准备消息内容
-        message = ("Excel文件当前被打开，是否保存并关闭？\n\n"
-                   "选择'是'：自动保存并关闭Excel\n"
-                   "选择'否'：使用临时文件继续\n"
-                   "选择'取消'：终止操作")
+                            for row_idx in range(len(df)):
+                                for col_idx in range(len(df.columns)):
+                                    try:
+                                        value = df.iloc[row_idx, col_idx]
+                                        if pd.isna(value):
+                                            value = ''
+                                        elif isinstance(value, (int, float)):
+                                            ws.write(row_idx + 1, col_idx, value)
+                                            continue
+                                        ws.write(row_idx + 1, col_idx, str(value))
+                                    except Exception as cell_error:
+                                        logger.log(f"写入单元格 ({row_idx}, {col_idx}) 时发生错误: {str(cell_error)}",
+                                                   "WARNING")
+                                        ws.write(row_idx + 1, col_idx, '')
 
-        # 显示对话框并等待响应
-        logger.log("显示文件锁定提示对话框", "INFO")
-        response = messagebox.askyesnocancel(
-            title="文件被占用",
-            message=message,
-            icon=messagebox.WARNING
-        )
+                            wb.save(excel_path)
+                        else:
+                            df.to_excel(excel_path, index=False, engine='openpyxl')
 
-        # 处理响应
-        if response is None:  # 取消
-            logger.log("用户选择取消操作", "INFO")
-            result = "cancel"
-        elif response:  # 是
-            logger.log("用户选择关闭Excel", "INFO")
-            result = "close"
-        else:  # 否
-            logger.log("用户选择使用临时文件", "INFO")
-            result = "temp"
+                        logger.log(f"成功保存数据到: {excel_path}", "SUCCESS")
+                        return True
+                    except Exception as save_error:
+                        logger.log(f"保存失败: {str(save_error)}", "ERROR")
 
-        # 销毁窗口
-        root.destroy()
-        return result
+            elif response == "temp":
+                # 创建临时文件
+                temp_path = excel_path.rsplit('.', 1)[0] + '_temp.' + excel_path.rsplit('.', 1)[1]
+                try:
+                    if is_xls:
+                        wb = xlwt.Workbook(encoding='utf-8')
+                        ws = wb.add_sheet('Sheet1')
+                        # 写入列名和数据
+                        for col_idx, col_name in enumerate(df.columns):
+                            ws.write(0, col_idx, str(col_name))
+
+                        for row_idx in range(len(df)):
+                            for col_idx in range(len(df.columns)):
+                                try:
+                                    value = df.iloc[row_idx, col_idx]
+                                    if pd.isna(value):
+                                        value = ''
+                                    elif isinstance(value, (int, float)):
+                                        ws.write(row_idx + 1, col_idx, value)
+                                        continue
+                                    ws.write(row_idx + 1, col_idx, str(value))
+                                except Exception as cell_error:
+                                    logger.log(f"写入单元格 ({row_idx}, {col_idx}) 时发生错误: {str(cell_error)}",
+                                               "WARNING")
+                                    ws.write(row_idx + 1, col_idx, '')
+                        wb.save(temp_path)
+                    else:
+                        df.to_excel(temp_path, index=False, engine='openpyxl')
+                    logger.log(f"已保存到临时文件: {temp_path}", "SUCCESS")
+                    return True
+                except Exception as temp_error:
+                    logger.log(f"保存临时文件失败: {str(temp_error)}", "ERROR")
+                    return False
+            else:
+                logger.log("取消保存", "WARNING")
+                return False
+
+        # 如果文件没有被占用，直接保存
+        try:
+            if is_xls:
+                wb = xlwt.Workbook(encoding='utf-8')
+                ws = wb.add_sheet('Sheet1')
+                # 写入列名和数据
+                for col_idx, col_name in enumerate(df.columns):
+                    ws.write(0, col_idx, str(col_name))
+
+                for row_idx in range(len(df)):
+                    for col_idx in range(len(df.columns)):
+                        try:
+                            value = df.iloc[row_idx, col_idx]
+                            if pd.isna(value):
+                                value = ''
+                            elif isinstance(value, (int, float)):
+                                ws.write(row_idx + 1, col_idx, value)
+                                continue
+                            ws.write(row_idx + 1, col_idx, str(value))
+                        except Exception as cell_error:
+                            logger.log(f"写入单元格 ({row_idx}, {col_idx}) 时发生错误: {str(cell_error)}", "WARNING")
+                            ws.write(row_idx + 1, col_idx, '')
+                wb.save(excel_path)
+            else:
+                df.to_excel(excel_path, index=False, engine='openpyxl')
+            logger.log(f"成功保存数据到: {excel_path}", "SUCCESS")
+            return True
+
+        except Exception as save_error:
+            logger.log(f"保存文件时发生错误: {str(save_error)}", "ERROR")
+            return False
 
     except Exception as e:
-        logger.log(f"显示对话框时发生错误: {str(e)}", "ERROR")
-        return "error"
+        logger.log(f"保存Excel数据时发生错误: {str(e)}", "ERROR")
+        return False
 
 
 def process_excel_data(driver, excel_path, logger):
+    """处理Excel数据"""
     try:
+        logger.log("正在检查Excel文件状态...")
+
+        # 检查文件是否被占用
+        if is_file_locked(excel_path):
+            logger.log("Excel文件正在被其他程序使用", "WARNING")
+
+            # 显示文件被占用对话框
+            response = show_file_locked_dialog(excel_path, logger)
+
+            if response == "close":
+                # 尝试正常关闭Excel文件
+                if not close_excel_file(excel_path, logger):
+                    # 如果正常关闭失败，则强制结束Excel进程
+                    if not kill_excel_process(logger):
+                        logger.log("无法关闭Excel文件，请手动关闭后重试", "ERROR")
+                        return False
+
+                # 等待文件释放
+                time.sleep(2)
+
+                # 再次检查文件是否被占用
+                if is_file_locked(excel_path):
+                    logger.log("Excel文件仍然被占用，请手动关闭后重试", "ERROR")
+                    return False
+
+            elif response == "temp":
+                # 创建临时文件路径
+                temp_path = excel_path.rsplit('.', 1)[0] + '_temp.' + excel_path.rsplit('.', 1)[1]
+                logger.log(f"将使用临时文件: {temp_path}", "INFO")
+                excel_path = temp_path
+            else:
+                logger.log("操作已取消", "WARNING")
+                return False
+
         logger.log("正在读取Excel文件...")
-        df = pd.read_excel(excel_path, engine='openpyxl')
+
+        # 根据文件扩展名选择不同的读取方式
+        if excel_path.lower().endswith('.xls'):
+            df = pd.read_excel(excel_path, engine='xlrd')
+        else:
+            df = pd.read_excel(excel_path, engine='openpyxl')
+
+        num_columns = len(df.columns)
+        logger.log(f"Excel文件共有 {num_columns} 列", "INFO")
+
+        # 寻找第一个空白列
+        p_column_index = None
+        for col_idx in range(num_columns):
+            # 检查该列是否为空
+            if df.iloc[:, col_idx].isna().all():  # 如果整列都是空的
+                p_column_index = col_idx
+                logger.log(f"找到空白列，索引为: {col_idx} (第{col_idx + 1}列)", "INFO")
+                break
+
+        if p_column_index is None:
+            logger.log("未找到空白列，将在文件末尾添加新列", "WARNING")
+            # 添加新列
+            df[f'Column{num_columns + 1}'] = pd.NA
+            p_column_index = num_columns
+
         logger.log("成功读取Excel文件", "SUCCESS")
+        logger.log(f"总行数: {len(df)}", "INFO")
 
         # 定位发件人输入框
-        sender_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, '//*[@id="search-form-sender"]'))
-        )
+        try:
+            sender_input = WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.XPATH, '//*[@id="search-form-sender"]'))
+            )
+            logger.log("成功找到发件人输入框", "SUCCESS")
+        except Exception as e:
+            logger.log(f"无法找到发件人输入框: {str(e)}", "ERROR")
+            return False
 
         start_row = 6  # Excel中的第7行
         processed_count = 0
         skipped_count = 0
 
         while start_row < len(df):
-            p_column_value = str(df.iloc[start_row, 15]).strip()
-            if pd.notna(p_column_value) and p_column_value != '' and p_column_value != 'nan':
-                logger.log(f"跳过第{start_row + 1}行：P列已有数据 '{p_column_value}'", "INFO")
-                skipped_count += 1
-                start_row += 1
-                continue
-
-            name = df.iloc[start_row, 3]
-            if pd.isna(name):
-                logger.log(f"跳过第{start_row + 1}行：D列为空", "INFO")
-                skipped_count += 1
-                start_row += 1
-                continue
-
-            logger.log(f"正在处理第{start_row + 1}行: {name}")
-
-            # 确保 sender_input 是可交互的
-            if sender_input.is_displayed() and sender_input.is_enabled():
-                sender_input.clear()  # 清空输入框
-                sender_input.send_keys(name)  # 输入D列的名字
-                logger.log(f"已输入搜索内容: {name}", "SUCCESS")
-            else:
-                logger.log("发件人输入框不可用，无法输入内容", "ERROR")
-                continue
-
-            # 点击搜索按钮
-            search_button = WebDriverWait(driver, 20).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-41"]/form/div[4]/button[1]'))
-            )
-            search_button.click()
-
-            # 等待搜索结果加载
-            logger.log("等待搜索结果加载...")
-            time.sleep(1.5)
-
             try:
-                # 点击链接打开新窗口
-                link = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-29"]/div[1]'))
-                )
-                link.click()
+                # 获取当前P列的值并检查是否为空
+                p_column_value = df.iloc[start_row, p_column_index]
 
-                # 切换到新窗口
-                new_window = driver.window_handles[-1]
-                driver.switch_to.window(new_window)
+                if pd.isna(p_column_value):  # 如果是空值，继续处理
+                    # 获取D列的值（第4列，索引3）
+                    d_column_index = 3
+                    name = str(df.iloc[start_row, d_column_index]).strip()
+                    if pd.isna(name) or name == '' or name == 'nan':
+                        logger.log(f"跳过第{start_row + 1}行：D列为空", "INFO")
+                        skipped_count += 1
+                        start_row += 1
+                        continue
 
-                # 等待新页面中的元素加载
-                content_element = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, '//*[@id="app-crm"]/div/div/div[2]/div/div[2]/div/div[2]/div[2]'))
-                )
+                    logger.log(f"正在处理第{start_row + 1}行: {name}")
 
-                # 获取内容
-                content = content_element.text
-                logger.log(f"获取到内容: {content}")
+                    try:
+                        # 每次操作前重新获取输入框
+                        sender_input = WebDriverWait(driver, 20).until(
+                            EC.presence_of_element_located((By.XPATH, '//*[@id="search-form-sender"]'))
+                        )
 
-                # 关闭新窗口
-                driver.close()
+                        if sender_input.is_displayed() and sender_input.is_enabled():
+                            sender_input.clear()
+                            sender_input.send_keys(Keys.CONTROL + "a")
+                            sender_input.send_keys(Keys.DELETE)
+                            sender_input.send_keys(name)
+                            logger.log(f"已输入搜索内容: {name}", "SUCCESS")
 
-                # 切回主窗口
-                driver.switch_to.window(driver.window_handles[0])
+                            # 点击搜索按钮
+                            search_button = WebDriverWait(driver, 20).until(
+                                EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-41"]/form/div[4]/button[1]'))
+                            )
+                            search_button.click()
 
-                # 写入内容并保存
-                df.iloc[start_row, 15] = content
-                if not save_excel_data(df, excel_path, logger):
-                    logger.log("保存失败，创建备份...", "WARNING")
-                    # 创建备份
-                    backup_path = excel_path.rsplit('.', 1)[0] + '_backup.' + excel_path.rsplit('.', 1)[1]
-                    save_excel_data(df, backup_path, logger)
+                            # 等待搜索结果加载
+                            logger.log("等待搜索结果加载...")
+                            time.sleep(2)  # 增加等待时间
 
-                logger.log(f"已将内容'{content}'保存到第{start_row + 1}行P列", "SUCCESS")
-                processed_count += 1
+                            try:
+                                # 点击链接打开新窗口
+                                link = WebDriverWait(driver, 10).until(
+                                    EC.element_to_be_clickable((By.XPATH, '//*[@id="widget-29"]/div[1]'))
+                                )
+                                link.click()
+                                logger.log("已点击搜索结果链接", "INFO")
+
+                                # 切换到新窗口
+                                time.sleep(1)  # 等待新窗口打开
+                                new_window = driver.window_handles[-1]
+                                driver.switch_to.window(new_window)
+
+                                # 等待新页面中的元素加载
+                                content_element = WebDriverWait(driver, 10).until(
+                                    EC.presence_of_element_located(
+                                        (By.XPATH, '//*[@id="app-crm"]/div/div/div[2]/div/div[2]/div/div[2]/div[2]'))
+                                )
+
+                                # 获取内容
+                                content = content_element.text
+                                logger.log(f"获取到内容: {content}")
+
+                                # 关闭新窗口
+                                driver.close()
+
+                                # 切回主窗口
+                                driver.switch_to.window(driver.window_handles[0])
+
+                                # 写入内容并保存
+                                df.iloc[start_row, p_column_index] = content
+                                if not save_excel_data(df, excel_path, logger):
+                                    logger.log("保存失败，创建备份...", "WARNING")
+                                    backup_path = excel_path.rsplit('.', 1)[0] + '_backup.' + excel_path.rsplit('.', 1)[
+                                        1]
+                                    save_excel_data(df, backup_path, logger)
+
+                                logger.log(f"已将内容保存到第{start_row + 1}行第{p_column_index + 1}列", "SUCCESS")
+                                processed_count += 1
+
+                            except Exception as e:
+                                logger.log(f"处理新窗口时发生错误: {str(e)}", "ERROR")
+                                # 确保回到主窗口
+                                try:
+                                    if len(driver.window_handles) > 1:
+                                        driver.close()
+                                    driver.switch_to.window(driver.window_handles[0])
+                                except:
+                                    pass
+
+                        else:
+                            logger.log("发件人输入框不可用，无法输入内容", "ERROR")
+
+                    except Exception as e:
+                        logger.log(f"处理第{start_row + 1}行时发生错误: {str(e)}", "ERROR")
+                        # 尝试恢复到主窗口
+                        try:
+                            if len(driver.window_handles) > 1:
+                                driver.switch_to.window(driver.window_handles[0])
+                        except:
+                            pass
+                else:
+                    logger.log(f"跳过第{start_row + 1}行：目标列已有数据", "INFO")
+                    skipped_count += 1
+
+                start_row += 1
+                time.sleep(random.uniform(2.0, 3.0))  # 增加随机等待时间
 
             except Exception as e:
-                logger.log(f"处理第{start_row + 1}行时发生错误: {str(e)}", "ERROR")
-
-            start_row += 1
-            time.sleep(1)
+                logger.log(f"处理行时发生错误: {str(e)}", "ERROR")
+                start_row += 1
+                continue
 
         logger.log("================================================================", "SUCCESS")
         logger.log("                      处理完成！", "SUCCESS")
@@ -997,9 +1209,11 @@ def process_excel_data(driver, excel_path, logger):
         logger.log(f"总行数: {len(df)}行", "SUCCESS")
         logger.log("================================================================", "SUCCESS")
 
+        return True
+
     except Exception as e:
         logger.log(f"处理Excel数据时发生错误: {str(e)}", "ERROR")
-        raise
+        return False
 
 
 def execute_action(excel_path, account, password, logger):
@@ -1008,23 +1222,23 @@ def execute_action(excel_path, account, password, logger):
     try:
         if not all([excel_path, account, password]):
             logger.log("错误：请填写所有必要信息！", "ERROR")
-            return
+            return False
 
         logger.log("正在检查配置...")
         if not check_paths(logger):
-            return
+            return False
 
         # 检查网络连接
         logger.log("正在检查网络连接...")
         if not check_internet_connection(logger):
             messagebox.showerror("错误", "网络连接失败，请检查网络设置！")
-            return
+            return False
 
         # 获取Chrome配置和driver
         chrome_options = get_chrome_config()
         driver_path = get_driver_path(logger)
         if not driver_path:
-            return
+            return False
 
         try:
             logger.log("正在启动Chrome浏览器...")
@@ -1049,21 +1263,21 @@ def execute_action(excel_path, account, password, logger):
 
             # 处理登录后的操作
             if not handle_post_login(driver, excel_path, logger):
-                logger.log("继续执行后续操作...", "INFO")
-                # 即使post_login失败也继续执行
-                pass
+                logger.log("登录后处理失败", "ERROR")
+                return False
 
-            # 继续执行其他操作...
             logger.log("所有操作完成", "SUCCESS")
+            return True
 
         except Exception as e:
             error_msg = f"浏览器操作发生错误：{str(e)}"
             logger.log(error_msg, "ERROR")
             messagebox.showerror("错误", error_msg)
+            return False
 
         finally:
             try:
-                if 'driver' in locals():
+                if driver:
                     driver.quit()
             except:
                 pass
@@ -1072,6 +1286,7 @@ def execute_action(excel_path, account, password, logger):
         error_msg = f"执行过程中发生错误：{str(e)}"
         logger.log(error_msg, "ERROR")
         messagebox.showerror("错误", error_msg)
+        return False
 
 
 def check_paths(logger):
@@ -1086,76 +1301,6 @@ def check_paths(logger):
 
     logger.log("所有路径检查通过", "SUCCESS")
     return True
-
-
-def save_excel_data(df, excel_path, logger):
-    """保存Excel数据，处理文件被占用的情况"""
-    try:
-        # 检查文件类型
-        is_xls = excel_path.lower().endswith('.xls')
-
-        if is_xls:
-            # 对于 .xls 文件，使用 xlwt
-            import xlwt
-            wb = xlwt.Workbook()
-            ws = wb.add_sheet('Sheet1')
-
-            # 写入列名
-            for col_idx, col_name in enumerate(df.columns):
-                ws.write(0, col_idx, str(col_name))
-
-            # 写入数据
-            for row_idx in range(len(df)):
-                for col_idx in range(len(df.columns)):
-                    value = df.iloc[row_idx, col_idx]
-                    # 处理空值
-                    if pd.isna(value):
-                        value = ''
-                    ws.write(row_idx + 1, col_idx, str(value))
-
-            # 保存文件
-            try:
-                wb.save(excel_path)
-                logger.log(f"成功保存数据到: {excel_path}", "SUCCESS")
-                return True
-            except Exception as save_error:
-                # 如果保存失败，尝保存为临时文件
-                temp_path = excel_path.rsplit('.', 1)[0] + '_temp.xls'
-                wb.save(temp_path)
-                logger.log(f"已保存到临时文件: {temp_path}", "WARNING")
-                return True
-
-        else:
-            # 对于其他格式（如 .xlsx），使用 pandas
-            df.to_excel(excel_path, index=False, engine='openpyxl')
-            logger.log(f"成功保存数据到: {excel_path}", "SUCCESS")
-            return True
-
-    except Exception as e:
-        logger.log(f"保存Excel时发生错误: {str(e)}", "ERROR")
-        # 尝试创建备份
-        try:
-            backup_path = excel_path.rsplit('.', 1)[0] + '_backup.xls'
-            if is_xls:
-                # 使用 xlwt 保存备份
-                wb = xlwt.Workbook()
-                ws = wb.add_sheet('Sheet1')
-                for col_idx, col_name in enumerate(df.columns):
-                    ws.write(0, col_idx, str(col_name))
-                for row_idx in range(len(df)):
-                    for col_idx in range(len(df.columns)):
-                        value = df.iloc[row_idx, col_idx]
-                        if pd.isna(value):
-                            value = ''
-                        ws.write(row_idx + 1, col_idx, str(value))
-                wb.save(backup_path)
-            else:
-                df.to_excel(backup_path, index=False)
-            logger.log(f"已创建备份文件: {backup_path}", "WARNING")
-            return True
-        except:
-            logger.log("创建备份文件失败", "ERROR")
-            return False
 
 
 def type_like_human(element, text, logger):
@@ -1278,6 +1423,14 @@ def get_content_from_new_window(driver, logger):
 
 def main():
     root = tk.Tk()
+    # 设置窗口图标
+    try:
+        icon_path = 'xdlovelife1.ico'
+        if os.path.exists(icon_path):
+            root.iconbitmap(icon_path)
+    except Exception as e:
+        print(f"设置图标失败: {str(e)}")
+        
     app = Application(root)
     root.mainloop()
 

@@ -15,13 +15,13 @@ VSVersionInfo(
       [
       StringTable(
         u'080404b0',
-        [StringStruct(u'CompanyName', u'XDLoveLife'),
-        StringStruct(u'FileDescription', u'阿里巴巴数据处理工具'),
+        [StringStruct(u'CompanyName', u'xdlovelife'),
+        StringStruct(u'FileDescription', u'阿里巴巴邮箱获取工具'),
         StringStruct(u'FileVersion', u'1.0.0'),
-        StringStruct(u'InternalName', u'AliDataOutput'),
-        StringStruct(u'LegalCopyright', u'Copyright (C) 2024'),
-        StringStruct(u'OriginalFilename', u'AliDataOutput.exe'),
-        StringStruct(u'ProductName', u'AliDataOutput'),
+        StringStruct(u'InternalName', u'AlibabaMailOutput'),
+        StringStruct(u'LegalCopyright', u'Copyright (C) 2024 xdlovelife'),
+        StringStruct(u'OriginalFilename', u'AlibabaMailOutput.exe'),
+        StringStruct(u'ProductName', u'阿里巴巴邮箱获取工具'),
         StringStruct(u'ProductVersion', u'1.0.0')])
       ]), 
     VarFileInfo([VarStruct(u'Translation', [2052, 1200])])

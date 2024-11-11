@@ -1,5 +1,6 @@
 # 数据提取自动化工具
-![27b0358e-b93d-4b96-b0d3-5e7cbf3f2758](https://github.com/user-attachments/assets/d2fdccd5-60f1-4278-abfb-462f0cb964fe)
+
+![75bfedbef44c7987d3a15e3241cc3e5d](https://github.com/user-attachments/assets/0c5c1ba1-17c8-4723-a9f4-caedc5010c5d)
 
 ## 项目简介
 
